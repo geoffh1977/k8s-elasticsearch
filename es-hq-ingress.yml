@@ -1,0 +1,16 @@
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: hq-ingress
+  annotations:
+    kubernetes.io/ingress.class: traefik
+spec:
+  rules:
+    - host: hq.house.local
+      http:
+        paths:
+          - path: /
+            backend:
+              serviceName: hq
+              servicePort: http

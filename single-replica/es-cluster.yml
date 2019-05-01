@@ -1,0 +1,140 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: elasticsearch
+
+---
+apiVersion: apps/v1beta1
+kind: StatefulSet
+metadata:
+  name: es-cluster
+  namespace: elasticsearch
+  labels:
+    component: elasticsearch
+    role: cluster
+spec:
+  serviceName: elasticsearch-cluster
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        component: elasticsearch
+        role: cluster
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: role
+                  operator: In
+                  values:
+                  - cluster
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+      - name: init-sysctl
+        image: busybox:1.27.2
+        command:
+        - sysctl
+        - -w
+        - vm.max_map_count=262144
+        securityContext:
+          privileged: true
+      containers:
+      - name: es-cluster
+        image: geoffh1977/elasticsearch-k8s:6.7.0
+        env:
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: CLUSTER_NAME
+          value: my-es
+        - name: NODE_MASTER
+          value: "true"
+        - name: NODE_INGEST
+          value: "true"
+        - name: NODE_DATA
+          value: "true"
+        - name: HTTP_ENABLE
+          value: "true"
+        - name: DISCOVERY_SERVICE
+          value: "elasticsearch-cluster"
+        - name: ES_JAVA_OPTS
+          value: -Xms512m -Xmx512m
+        - name: PROCESSORS
+          valueFrom:
+            resourceFieldRef:
+              resource: limits.cpu
+        resources:
+          requests:
+            cpu: 250m
+          limits:
+            cpu: 1
+        ports:
+        - containerPort: 9200
+          name: http
+        - containerPort: 9300
+          name: transport
+        livenessProbe:
+          tcpSocket:
+            port: transport
+          initialDelaySeconds: 20
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /_cluster/health
+            port: http
+          initialDelaySeconds: 20
+          timeoutSeconds: 5
+        volumeMounts:
+        - name: storage
+          mountPath: /data
+      volumes:
+      - emptyDir:
+          medium: ""
+        name: "storage"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch-cluster
+  namespace: elasticsearch
+  labels:
+    component: elasticsearch
+    role: cluster
+spec:
+  ports:
+  - port: 9300
+    name: transport
+    protocol: TCP
+  clusterIP: None
+  type: ClusterIP
+  selector:
+    component: elasticsearch
+    role: cluster
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  namespace: elasticsearch
+  labels:
+    component: elasticsearch
+    role: cluster
+spec:
+  selector:
+    component: elasticsearch
+    role: cluster
+  ports:
+  - name: http
+    port: 9200
+  type: NodePort
